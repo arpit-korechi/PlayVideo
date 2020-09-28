@@ -6,9 +6,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Handler;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
+import android.widget.Toast;
 import android.widget.VideoView;
 
 import org.apache.commons.io.IOUtils;
@@ -21,6 +24,8 @@ import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.net.URL;
 import java.util.Objects;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -34,6 +39,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = MainActivity.class.getSimpleName();
 
     ImageView videoView;
+    Handler handler = new Handler();
+    Timer timer = new Timer();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,10 +49,31 @@ public class MainActivity extends AppCompatActivity {
 
         videoView = (ImageView) findViewById(R.id.videoView);
 
-        new GetImageLink().execute();
+        callAsynchronousTask();
 
     }
 
+    public void callAsynchronousTask() {
+        TimerTask doAsynchronousTask = new TimerTask() {
+            @Override
+            public void run() {
+                handler.post(new Runnable() {
+                    public void run() {
+                        try {
+                            if (Constants.internetConnectionAvailable(4)) {
+                                new GetImageLink().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+                            } else {
+                                Toast.makeText(MainActivity.this, "No Internet", Toast.LENGTH_SHORT).show();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+            }
+        };
+        timer.schedule(doAsynchronousTask, 0, 1000); //execute in every 1000 ms
+    }
 
     public class GetImageLink extends AsyncTask<Void, Void, Void> {
 
@@ -107,16 +135,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
     private class DownloadImageTask extends AsyncTask<String, Void, Void> {
 
         byte[] bytes;
         Bitmap picture = null;
+        String imageString;
 
         @Override
         protected Void doInBackground(String... urls) {
 
-            if (urls[0]!=null) {
+            if (urls[0] != null) {
                 final OkHttpClient client = new OkHttpClient();
 
                 Request request = new Request.Builder()
@@ -133,36 +161,14 @@ public class MainActivity extends AppCompatActivity {
                 assert response != null;
                 if (response.isSuccessful()) {
                     try {
-                        assert response.body() != null;
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        IOUtils.copy(response.body().byteStream(), baos);
-                        bytes = baos.toByteArray();
-                        picture = BitmapFactory.decodeStream(response.body().byteStream());
-                    } catch (Exception e) {
+                        imageString = Objects.requireNonNull(response.body()).string();
+                        Log.d(TAG, "doInBackground: image string : " + imageString);
+                    } catch (IOException e) {
                         e.printStackTrace();
                     }
 
                 }
             }
-
-           /* ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-            InputStream is = null;
-            try {
-                URL url = new URL(urls[0]);
-                byte[] chunk = new byte[4096];
-                int bytesRead;
-                InputStream stream = url.openStream();
-
-                while ((bytesRead = stream.read(chunk)) > 0) {
-                    outputStream.write(chunk, 0, bytesRead);
-                }
-
-            } catch (IOException e) {
-                e.printStackTrace();
-                return null;
-            }
-
-            bytes = outputStream.toByteArray();*/
 
             return null;
         }
@@ -170,12 +176,20 @@ public class MainActivity extends AppCompatActivity {
         @Override
         protected void onPostExecute(Void aVoid) {
             super.onPostExecute(aVoid);
-            if (bytes != null) {
-                Log.d(TAG, "onPostExecute: bytes: " + bytes.length);
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                videoView.setImageBitmap(bitmap);
-            }
+            handleResultsFreedomVideo(imageString);
+        }
 
+
+        private void handleResultsFreedomVideo(String videoFrameBase64) {
+            if (videoFrameBase64 != null) {
+                //decode base64 string to image
+                byte[] imageBytes = Base64.decode(videoFrameBase64, Base64.DEFAULT);
+                Bitmap decodedImage = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length);
+                videoView.setImageBitmap(decodedImage);
+                videoView.requestLayout();
+                videoView.getLayoutParams().height = 480;
+                videoView.getLayoutParams().width = 640;
+            }
         }
 
     }
